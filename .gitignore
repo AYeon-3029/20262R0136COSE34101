@@ -1,0 +1,15 @@
+*.o
+*.d
+*.asm
+*.sym
+*.img
+*.pdf
+*.md
+*.tar.gz
+_*
+/xv6-proj1/kernel
+/xv6-proj1/kernelmemfs
+/xv6-proj1/bootblock
+/xv6-proj1/mkfs
+/xv6-proj1/vectors.S
+/xv6-proj1/.gdbinit
