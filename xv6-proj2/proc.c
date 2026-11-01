@@ -10,7 +10,8 @@
 struct {
   struct spinlock lock;
   struct proc proc[NPROC];
-  struct proc *ready;
+  struct proc *ready[NPROC];
+  int nready;
 } ptable;
 
 static struct proc *initproc;
@@ -25,26 +26,44 @@ static void wakeup1(void *chan);
 static void
 readyinsert(struct proc *p)
 {
-  struct proc **link = &ptable.ready;
+  int i, pos;
 
-  while(*link && ((*link)->priority < p->priority ||
-        ((*link)->priority == p->priority && (*link)->pid > p->pid)))
-    link = &(*link)->nextready;
-  p->nextready = *link;
-  *link = p;
+  if(ptable.nready == NPROC)
+    panic("ready queue full");
+
+  // Find where p belongs: lower nice first, then larger PID.
+  for(pos = 0; pos < ptable.nready; pos++){
+    if(p->priority < ptable.ready[pos]->priority)
+      break;
+    if(p->priority == ptable.ready[pos]->priority &&
+       p->pid > ptable.ready[pos]->pid)
+      break;
+  }
+
+  // Move later entries right to make one empty slot.
+  for(i = ptable.nready; i > pos; i--)
+    ptable.ready[i] = ptable.ready[i - 1];
+  ptable.ready[pos] = p;
+  ptable.nready++;
 }
 
 static void
 readyremove(struct proc *p)
 {
-  struct proc **link = &ptable.ready;
+  int i, pos;
 
-  while(*link && *link != p)
-    link = &(*link)->nextready;
-  if(*link == 0)
+  for(pos = 0; pos < ptable.nready; pos++){
+    if(ptable.ready[pos] == p)
+      break;
+  }
+  if(pos == ptable.nready)
     panic("readyremove");
-  *link = p->nextready;
-  p->nextready = 0;
+
+  // Move later entries left to fill the empty slot.
+  for(i = pos; i < ptable.nready - 1; i++)
+    ptable.ready[i] = ptable.ready[i + 1];
+  ptable.nready--;
+  ptable.ready[ptable.nready] = 0;
 }
 
 void
@@ -115,7 +134,6 @@ allocproc(void)
 found:
   p->state = EMBRYO;
   p->pid = nextpid++;
-  p->nextready = 0;
 
   release(&ptable.lock);
 
@@ -369,7 +387,8 @@ scheduler(void)
 
     // Take the highest-priority process from the ready queue.
     acquire(&ptable.lock);
-    if((p = ptable.ready) != 0){
+    if(ptable.nready > 0){
+      p = ptable.ready[0];
       readyremove(p);
 
       // Switch to chosen process.  It is the process's job
