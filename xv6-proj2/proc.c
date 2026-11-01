@@ -10,6 +10,7 @@
 struct {
   struct spinlock lock;
   struct proc proc[NPROC];
+  struct proc *ready;
 } ptable;
 
 static struct proc *initproc;
@@ -19,6 +20,32 @@ extern void forkret(void);
 extern void trapret(void);
 
 static void wakeup1(void *chan);
+
+// Ready queue operations require ptable.lock.
+static void
+readyinsert(struct proc *p)
+{
+  struct proc **link = &ptable.ready;
+
+  while(*link && ((*link)->priority < p->priority ||
+        ((*link)->priority == p->priority && (*link)->pid > p->pid)))
+    link = &(*link)->nextready;
+  p->nextready = *link;
+  *link = p;
+}
+
+static void
+readyremove(struct proc *p)
+{
+  struct proc **link = &ptable.ready;
+
+  while(*link && *link != p)
+    link = &(*link)->nextready;
+  if(*link == 0)
+    panic("readyremove");
+  *link = p->nextready;
+  p->nextready = 0;
+}
 
 void
 pinit(void)
@@ -88,6 +115,7 @@ allocproc(void)
 found:
   p->state = EMBRYO;
   p->pid = nextpid++;
+  p->nextready = 0;
 
   release(&ptable.lock);
 
@@ -151,6 +179,7 @@ userinit(void)
   acquire(&ptable.lock);
 
   p->state = RUNNABLE;
+  readyinsert(p);
 
   release(&ptable.lock);
 }
@@ -222,6 +251,7 @@ fork(void)
     np->priority = curproc->priority + 1;
 
   np->state = RUNNABLE;
+  readyinsert(np);
 
   release(&ptable.lock);
 
@@ -337,11 +367,10 @@ scheduler(void)
     // Enable interrupts on this processor.
     sti();
 
-    // Loop over process table looking for process to run.
+    // Take the highest-priority process from the ready queue.
     acquire(&ptable.lock);
-    for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
-      if(p->state != RUNNABLE)
-        continue;
+    if((p = ptable.ready) != 0){
+      readyremove(p);
 
       // Switch to chosen process.  It is the process's job
       // to release ptable.lock and then reacquire it
@@ -394,6 +423,7 @@ yield(void)
 {
   acquire(&ptable.lock);  //DOC: yieldlock
   myproc()->state = RUNNABLE;
+  readyinsert(myproc());
   sched();
   release(&ptable.lock);
 }
@@ -467,8 +497,10 @@ wakeup1(void *chan)
   struct proc *p;
 
   for(p = ptable.proc; p < &ptable.proc[NPROC]; p++)
-    if(p->state == SLEEPING && p->chan == chan)
+    if(p->state == SLEEPING && p->chan == chan){
       p->state = RUNNABLE;
+      readyinsert(p);
+    }
 }
 
 // Wake up all processes sleeping on chan.
@@ -493,8 +525,10 @@ kill(int pid)
     if(p->pid == pid){
       p->killed = 1;
       // Wake process from sleep if necessary.
-      if(p->state == SLEEPING)
+      if(p->state == SLEEPING){
         p->state = RUNNABLE;
+        readyinsert(p);
+      }
       release(&ptable.lock);
       return 0;
     }
@@ -550,7 +584,11 @@ setnice(int pid, int nice)
   acquire(&ptable.lock);
   for( p = ptable.proc; p < &ptable.proc[NPROC]; p++){
     if(p->pid==pid){
+      if(p->state == RUNNABLE)
+        readyremove(p);
       p->priority = nice;
+      if(p->state == RUNNABLE)
+        readyinsert(p);
       release(&ptable.lock);
       return 0;
     }
