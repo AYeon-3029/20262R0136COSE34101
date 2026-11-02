@@ -77,6 +77,7 @@ void            cmostime(struct rtcdate *r);
 int             lapicid(void);
 extern volatile uint*    lapic;
 void            lapiceoi(void);
+void            lapicresched(uchar);
 void            lapicinit(void);
 void            lapicstartap(uchar, uint);
 void            microdelay(int);
@@ -119,7 +120,7 @@ void            sleep(void*, struct spinlock*);
 void            userinit(void);
 int             wait(void);
 void            wakeup(void*);
-int             needresched(void);
+void            resched(void);
 void            yield(void);
 int             setnice(int,int);
 

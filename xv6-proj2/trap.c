@@ -43,10 +43,16 @@ trap(struct trapframe *tf)
     syscall();
     if(myproc()->killed)
       exit();
+    resched();
+    if(myproc()->killed)
+      exit();
     return;
   }
 
   switch(tf->trapno){
+  case T_RESCHED:
+    lapiceoi();
+    break;
   case T_IRQ0 + IRQ_TIMER:
     if(cpuid() == 0){
       acquire(&tickslock);
@@ -105,6 +111,8 @@ trap(struct trapframe *tf)
   if(myproc() && myproc()->state == RUNNING &&
      tf->trapno == T_IRQ0+IRQ_TIMER)
     yield();
+  else
+    resched();
 
   // Check if the process has been killed since we yielded
   if(myproc() && myproc()->killed && (tf->cs&3) == DPL_USER)

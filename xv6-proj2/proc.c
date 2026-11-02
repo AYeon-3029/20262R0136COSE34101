@@ -23,6 +23,28 @@ extern void trapret(void);
 static void wakeup1(void *chan);
 
 static void
+reschedothers(void)
+{
+  struct proc *p;
+  struct proc *next;
+  int i;
+
+  if(ptable.nready == 0)
+    return;
+  next = ptable.ready[0];
+  for(i = 0; i < ncpu; i++){
+    if(&cpus[i] == mycpu())
+      continue;
+    p = cpus[i].proc;
+    if(p == 0 || p->state != RUNNING)
+      continue;
+    if(next->priority < p->priority ||
+       (next->priority == p->priority && next->pid > p->pid))
+      lapicresched(cpus[i].apicid);
+  }
+}
+
+static void
 readyinsert(struct proc *p)
 {
   int i, pos;
@@ -42,6 +64,7 @@ readyinsert(struct proc *p)
     ptable.ready[i] = ptable.ready[i - 1];
   ptable.ready[pos] = p;
   ptable.nready++;
+  reschedothers();
 }
 
 static void
@@ -431,14 +454,13 @@ sched(void)
   mycpu()->intena = intena;
 }
 
-int
+static int
 needresched(void)
 {
   struct proc *p;
   struct proc *next;
   int result = 0;
 
-  acquire(&ptable.lock);
   p = myproc();
   if(p != 0 && p->state == RUNNING && ptable.nready > 0){
     next = ptable.ready[0];
@@ -447,9 +469,23 @@ needresched(void)
     else if(next->priority == p->priority && next->pid > p->pid)
       result = 1;
   }
-  release(&ptable.lock);
 
   return result;
+}
+
+void
+resched(void)
+{
+  struct proc *p;
+
+  acquire(&ptable.lock);
+  if(needresched()){
+    p = myproc();
+    p->state = RUNNABLE;
+    readyinsert(p);
+    sched();
+  }
+  release(&ptable.lock);
 }
 
 // Give up the CPU for one scheduling round.
@@ -624,6 +660,8 @@ setnice(int pid, int nice)
       p->priority = nice;
       if(p->state == RUNNABLE)
         readyinsert(p);
+      else if(p->state == RUNNING)
+        reschedothers();
       release(&ptable.lock);
       return 0;
     }
