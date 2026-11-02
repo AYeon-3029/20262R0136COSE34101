@@ -22,7 +22,6 @@ extern void trapret(void);
 
 static void wakeup1(void *chan);
 
-// Ready queue operations require ptable.lock.
 static void
 readyinsert(struct proc *p)
 {
@@ -31,7 +30,6 @@ readyinsert(struct proc *p)
   if(ptable.nready == NPROC)
     panic("ready queue full");
 
-  // Find where p belongs: lower nice first, then larger PID.
   for(pos = 0; pos < ptable.nready; pos++){
     if(p->priority < ptable.ready[pos]->priority)
       break;
@@ -40,7 +38,6 @@ readyinsert(struct proc *p)
       break;
   }
 
-  // Move later entries right to make one empty slot.
   for(i = ptable.nready; i > pos; i--)
     ptable.ready[i] = ptable.ready[i - 1];
   ptable.ready[pos] = p;
@@ -59,7 +56,6 @@ readyremove(struct proc *p)
   if(pos == ptable.nready)
     panic("readyremove");
 
-  // Move later entries left to fill the empty slot.
   for(i = pos; i < ptable.nready - 1; i++)
     ptable.ready[i] = ptable.ready[i + 1];
   ptable.nready--;
@@ -385,7 +381,6 @@ scheduler(void)
     // Enable interrupts on this processor.
     sti();
 
-    // Take the highest-priority process from the ready queue.
     acquire(&ptable.lock);
     if(ptable.nready > 0){
       p = ptable.ready[0];
@@ -434,6 +429,27 @@ sched(void)
   intena = mycpu()->intena;
   swtch(&p->context, mycpu()->scheduler);
   mycpu()->intena = intena;
+}
+
+int
+needresched(void)
+{
+  struct proc *p;
+  struct proc *next;
+  int result = 0;
+
+  acquire(&ptable.lock);
+  p = myproc();
+  if(p != 0 && p->state == RUNNING && ptable.nready > 0){
+    next = ptable.ready[0];
+    if(next->priority < p->priority)
+      result = 1;
+    else if(next->priority == p->priority && next->pid > p->pid)
+      result = 1;
+  }
+  release(&ptable.lock);
+
+  return result;
 }
 
 // Give up the CPU for one scheduling round.
