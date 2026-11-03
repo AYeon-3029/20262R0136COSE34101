@@ -116,8 +116,7 @@ lapiceoi(void)
 void
 lapicresched(uchar apicid)
 {
-  if(!lapic)
-    return;
+  if (!lapic) return;
   while(lapic[ICRLO] & DELIVS)
     ;
   lapicw(ICRHI, apicid << 24);
